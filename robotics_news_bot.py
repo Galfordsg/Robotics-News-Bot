@@ -5,8 +5,12 @@ import os
 from datetime import datetime
 
 # === CONFIGURATION ===
-TELEGRAM_TOKEN = "8677362823:AAEbBojzYBCcDOSV4FSI0B4b86Gk14DFqB8"
-CHAT_ID = "809404258"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+if not TELEGRAM_TOKEN or not CHAT_ID:
+            print("X Error: TELEGRAM_TOKEN or CHAT_ID environment variable not set!")
+            exit(1)
 
 # Keywords (you can add/remove)
 KEYWORDS = ["robot", "robots", "ugv", "drones", "autonomous", 
