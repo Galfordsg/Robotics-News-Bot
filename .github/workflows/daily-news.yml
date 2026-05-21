@@ -2,7 +2,7 @@ name: Daily Robotics News
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs every day at 8:00 AM Singapore Time
+    - cron: '0 11 * * *' # Runs every day at 7:00 PM Singapore Time
   workflow_dispatch: # Allows you to run it manually anytime
 
 jobs:
