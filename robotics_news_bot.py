@@ -10,11 +10,17 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not TELEGRAM_TOKEN or not CHAT_ID or not GEMINI_API_KEY:
-    print("❌ Missing credentials!")
+if not TELEGRAM_TOKEN or not CHAT_ID:
+    print("❌ Missing Telegram credentials!")
     exit(1)
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = None
+if GEMINI_API_KEY:
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        print("✅ Gemini client connected")
+    except Exception as e:
+        print(f"Gemini init failed: {e}")
 
 RSS_FEEDS = [
     "https://www.therobotreport.com/feed/",
@@ -23,7 +29,7 @@ RSS_FEEDS = [
 ]
 
 SEEN_FILE = "seen_articles.txt"
-MAX_ARTICLES_TO_SEND = 6
+MAX_ARTICLES_TO_SEND = 5
 
 def clean_link(link):
     if "news.google.com" in link:
@@ -53,71 +59,43 @@ def send_to_telegram(message):
         pass
 
 def evaluate_article(title, summary):
-    prompt = f"""Rate this robotics article's importance (1-10) for people interested in technological breakthroughs.
+    if not client:
+        return "**Score: 6/10**\nAI evaluation unavailable."
+
+    prompt = f"""Rate this article's importance (1-10) for robotics enthusiasts interested in breakthroughs.
 
 Title: {title}
 Summary: {summary}
 
-Especially value:
-- Humanoid robots replacing/supplementing human labor
-- Major drone or autonomous tech advances
-- Fundamental new capabilities or industry shifts
+Focus on humanoid robots, labor replacement, drone tech, and major innovations.
 
-Reply in this exact format:
+Reply exactly in this format:
 Score: X/10
-Reason: Short 1-sentence explanation"""
+Reason: One short sentence."""
 
     try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        text = response.text.strip()
-        # More robust parsing
-        score_line = [line for line in text.split('\n') if "Score:" in line]
-        reason_line = [line for line in text.split('\n') if "Reason:" in line]
-        
-        score = 5
-        if score_line:
-            try:
-                score = int(''.join(filter(str.isdigit, score_line[0])))
-            except:
-                pass
-                
-        reason = reason_line[0] if reason_line else text[:200]
-        return f"**Score: {min(max(score, 1), 10)}/10**\n{reason}"
-        
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt,
+            generation_config={"temperature": 0.3}
+        )
+        return response.text.strip()
     except Exception as e:
-        print(f"Evaluation error: {e}")
+        print(f"Evaluation failed: {e}")
         return "**Score: 5/10**\nEvaluation temporarily unavailable."
-
-def generate_overall_summary(top_articles):
-    if not top_articles:
-        return "No major articles today."
-    
-    articles_list = "\n".join([f"- {a['title']}" for a in top_articles])
-    prompt = f"""Write a concise, insightful evening summary on today's robotics developments.
-
-Articles:
-{articles_list}
-
-Highlight the main trends and implications for the future."""
-
-    try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        return response.text
-    except:
-        return "Summary generation encountered an issue today."
 
 def main():
     seen = load_seen_articles()
     candidates = []
-    print(f"[{datetime.now()}] Starting advanced analysis...")
+    print(f"[{datetime.now()}] Starting analysis...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:35]:
+            for entry in feed.entries[:30]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:450]
+                summary = entry.get("summary", entry.get("description", ""))[:400]
 
                 if not title or not link or link in seen:
                     continue
@@ -129,26 +107,24 @@ def main():
                     "evaluation": evaluation
                 })
                 save_seen_article(link)
-                time.sleep(1.3)
+                time.sleep(1.5)
         except Exception as e:
             print(f"Feed error: {e}")
 
-    # Take top articles
+    # Send top articles
     top_articles = candidates[:MAX_ARTICLES_TO_SEND]
-
-    # Send articles
     for article in top_articles:
         msg = f"📰 **{article['title']}**\n\n{article['evaluation']}\n\n🔗 {article['link']}"
         send_to_telegram(msg)
-        time.sleep(2.5)
+        time.sleep(2)
 
-    # Overall Summary
-    time.sleep(6)
-    overall = generate_overall_summary(top_articles)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{overall}"
+    # Simple summary
+    time.sleep(5)
+    count = len(top_articles)
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nProcessed {count} articles today.\n\nAI analysis is being tuned."
     send_to_telegram(final_msg)
 
-    print(f"Completed. Sent {len(top_articles)} selected articles.")
+    print(f"Finished. Sent {count} articles.")
 
 if __name__ == "__main__":
     main()
