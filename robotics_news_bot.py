@@ -3,6 +3,7 @@ import requests
 import time
 import os
 from datetime import datetime
+from google import genai
 
 # === CONFIGURATION ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -13,16 +14,14 @@ if not TELEGRAM_TOKEN or not CHAT_ID:
     print("❌ Missing Telegram credentials!")
     exit(1)
 
-# Gemini Setup
-try:
-    from google import genai
-    client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-    print("✅ Gemini ready" if client else "⚠ Gemini disabled")
-except:
-    client = None
-    print("⚠ Could not import google-genai")
+client = None
+if GEMINI_API_KEY:
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    print("✅ Gemini ready for smart filtering")
+else:
+    print("⚠ No Gemini key - falling back to basic mode")
 
-KEYWORDS = ["robot", "robots", "drone", "drones", "autonomous", "robotics", "uav", "unmanned", "humanoid"]
+KEYWORDS = ["robot", "robots", "drone", "drones", "autonomous", "robotics", "uav", "humanoid", "cobots"]
 
 RSS_FEEDS = [
     "https://www.therobotreport.com/feed/",
@@ -31,15 +30,13 @@ RSS_FEEDS = [
 ]
 
 SEEN_FILE = "seen_articles.txt"
-articles_today = []
-MAX_ARTICLES_PER_RUN = 7
+MAX_ARTICLES_TO_SEND = 5   # Only send the best ones
 
 def clean_link(link):
     if "news.google.com" in link:
         try:
             r = requests.head(link, allow_redirects=True, timeout=10)
-            clean = r.url.split("?")[0]
-            return clean
+            return r.url.split("?")[0]
         except:
             pass
     return link
@@ -62,65 +59,80 @@ def send_to_telegram(message):
     except:
         pass
 
-def generate_summary(articles):
-    if not client or not articles:
-        return "No AI summary available this run."
+def analyze_article(title, summary):
+    """Use Gemini to score how important/innovative the article is"""
+    if not client:
+        return 5  # Default score if no AI
     
-    article_list = "\n".join([f"- {a}" for a in articles])
-    prompt = f"""Summarize these robotics news articles in a clear, engaging way:
+    prompt = f"""Rate this robotics article from 1 to 10 based on how groundbreaking or important it is.
 
-{article_list}
+Title: {title}
+Summary: {summary}
 
-Structure:
-- One opening highlight
-- Bullet points of key news"""
+Focus especially on:
+- Humanoids / replacing human labor
+- Major drone / UAV breakthroughs
+- New autonomous systems
+- Fundamental technology leaps
+- Industry-changing news
+
+Return only a number (1-10) and nothing else."""
 
     try:
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        return response.text
-    except Exception as e:
-        print(f"Gemini error: {e}")
-        return "Summary generation failed."
+        score = int(''.join(filter(str.isdigit, response.text or "5"))) 
+        return min(max(score, 1), 10)
+    except:
+        return 5
 
 def main():
-    global articles_today
     seen = load_seen_articles()
-    new_count = 0
-    print(f"[{datetime.now()}] Starting check...")
+    candidates = []
+    print(f"[{datetime.now()}] Starting smart robotics news check...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:25]:
+            for entry in feed.entries[:30]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:320]
+                summary = entry.get("summary", entry.get("description", ""))[:400]
 
                 if not title or not link or link in seen:
                     continue
 
                 if any(kw in (title + summary).lower() for kw in KEYWORDS):
-                    clean_link = clean_link(link)
-                    
-                    send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean_link}")
-
-                    articles_today.append(title)
+                    score = analyze_article(title, summary)
+                    candidates.append({
+                        "title": title,
+                        "link": clean_link(link),
+                        "summary": summary,
+                        "score": score
+                    })
                     save_seen_article(link)
-                    new_count += 1
-                    time.sleep(1.6)
-
-                    if new_count >= MAX_ARTICLES_PER_RUN:
-                        break
+                    time.sleep(1.2)
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Feed error: {e}")
 
-    # Summary at the end
-    time.sleep(6)
-    summary_text = generate_summary(articles_today)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{summary_text}\n\n📌 Total articles: {len(articles_today)}"
-    send_to_telegram(final_msg)
+    # Sort by importance and take top ones
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    top_articles = candidates[:MAX_ARTICLES_TO_SEND]
 
-    print(f"Finished. Sent {new_count} articles.")
+    # Send only the best articles
+    for article in top_articles:
+        send_to_telegram(f"📰 **{article['title']}** (Score: {article['score']}/10)\n\n{article['summary'][:300]}...\n\n🔗 {article['link']}")
+        time.sleep(2)
+
+    # Final Summary
+    time.sleep(5)
+    if top_articles:
+        summary_text = "Today's top robotics developments focused on high-impact innovations."
+        final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{summary_text}\n\nFeatured {len(top_articles)} most important articles."
+        send_to_telegram(final_msg)
+    else:
+        send_to_telegram(f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nNo major groundbreaking articles found today.")
+
+    print(f"Finished. Selected {len(top_articles)} high-quality articles out of {len(candidates)} candidates.")
 
 if __name__ == "__main__":
     main()
