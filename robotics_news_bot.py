@@ -4,48 +4,66 @@ import time
 import os
 from datetime import datetime
 
-# === CONFIGURATION ===
+# CONFIG
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("❌ Missing credentials!")
-    exit(1)
 
 RSS_FEEDS = [
     "https://www.therobotreport.com/feed/",
     "https://roboticsandautomationnews.com/feed/",
-    "https://news.google.com/rss/search?q=robotics+OR+humanoid+OR+drone+OR+autonomous&hl=en-US&gl=US&ceid=US:en",
 ]
 
 SEEN_FILE = "seen_articles.txt"
-MAX_ARTICLES_TO_SEND = 6
+MAX_ARTICLES = 5
 
-def clean_link(link):
-    if "news.google.com" in link:
-        try:
-            r = requests.head(link, allow_redirects=True, timeout=10)
-            return r.url.split("?")[0]
-        except:
-            pass
-    return link
+def main():
+    print(f"[{datetime.now()}] Script started. Working directory: {os.getcwd()}")
+    
+    # Force create seen file
+    if not os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+            f.write("# Seen articles\n")
+        print("Created new seen_articles.txt file")
 
-def load_seen_articles():
+    seen = set()
     try:
-        if os.path.exists(SEEN_FILE):
-            with open(SEEN_FILE, "r", encoding="utf-8") as f:
-                return set(line.strip() for line in f if line.strip())
-    except:
-        pass
-    return set()
-
-def save_seen_article(link):
-    try:
-        with open(SEEN_FILE, "a", encoding="utf-8") as f:
-            f.write(link + "\n")
-        print(f"Saved to seen: {link[:60]}...")
+        with open(SEEN_FILE, "r", encoding="utf-8") as f:
+            seen = set(line.strip() for line in f if line.strip() and not line.startswith("#"))
+        print(f"Loaded {len(seen)} previously seen articles")
     except Exception as e:
-        print(f"Failed to save article: {e}")
+        print(f"Error loading seen file: {e}")
+
+    sent = 0
+
+    for feed_url in RSS_FEEDS:
+        try:
+            print(f"Fetching: {feed_url}")
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:20]:
+                title = entry.get("title", "").strip()
+                link = entry.get("link", "")
+                if not title or not link or link in seen:
+                    continue
+
+                summary = entry.get("summary", entry.get("description", ""))[:300]
+                clean_link = link
+
+                send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean_link}")
+                save_seen_article(link)
+                seen.add(link)
+                sent += 1
+                time.sleep(2)
+
+                if sent >= MAX_ARTICLES:
+                    break
+        except Exception as e:
+            print(f"Error processing feed: {e}")
+
+    # Final message
+    time.sleep(4)
+    send_to_telegram(f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent} articles this run.")
+
+    print(f"Finished. Total sent this run: {sent}")
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -55,42 +73,13 @@ def send_to_telegram(message):
     except:
         pass
 
-def main():
-    seen = load_seen_articles()
-    sent_count = 0
-    print(f"[{datetime.now()}] Starting check... Current seen articles: {len(seen)}")
-
-    for feed_url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:35]:
-                title = entry.get("title", "").strip()
-                link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:350]
-
-                if not title or not link or link in seen:
-                    continue
-
-                text = (title + summary).lower()
-                if any(word in text for word in ["humanoid", "drone", "autonomous", "breakthrough", "labour", "labor", "unveils", "launches"]):
-                    clean = clean_link(link)
-                    send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean}")
-                    save_seen_article(link)
-                    seen.add(link)   # Update in memory too
-                    sent_count += 1
-                    time.sleep(2)
-
-                    if sent_count >= MAX_ARTICLES_TO_SEND:
-                        break
-        except Exception as e:
-            print(f"Feed error: {e}")
-
-    # Summary
-    time.sleep(5)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} articles today.\n\nFocusing on breakthroughs in humanoid, drone & autonomous tech."
-    send_to_telegram(final_msg)
-
-    print(f"Finished run. Sent {sent_count} articles.")
+def save_seen_article(link):
+    try:
+        with open(SEEN_FILE, "a", encoding="utf-8") as f:
+            f.write(link + "\n")
+        print(f"SAVED TO SEEN: {link[:80]}...")
+    except Exception as e:
+        print(f"FAILED to save: {e}")
 
 if __name__ == "__main__":
     main()
