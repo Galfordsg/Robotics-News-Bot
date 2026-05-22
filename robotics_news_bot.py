@@ -37,8 +37,11 @@ def load_seen_articles():
     return set()
 
 def save_seen_article(link):
-    with open(SEEN_FILE, "a", encoding="utf-8") as f:
-        f.write(link + "\n")
+    try:
+        with open(SEEN_FILE, "a", encoding="utf-8") as f:
+            f.write(link + "\n")
+    except:
+        pass
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -51,12 +54,12 @@ def send_to_telegram(message):
 def main():
     seen = load_seen_articles()
     sent_count = 0
-    print(f"[{datetime.now()}] Starting stable check...")
+    print(f"[{datetime.now()}] Starting check...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:30]:
+            for entry in feed.entries[:35]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
                 summary = entry.get("summary", entry.get("description", ""))[:350]
@@ -64,25 +67,27 @@ def main():
                 if not title or not link or link in seen:
                     continue
 
-                # Basic smart filter (you can expand this)
-                if any(word in (title + summary).lower() for word in ["humanoid", "labour", "labor", "breakthrough", "drone", "autonomous"]):
+                # Smart basic filter for more interesting articles
+                text = (title + summary).lower()
+                if any(word in text for word in ["humanoid", "labor", "labour", "drone", "breakthrough", "autonomous", "new robot", "unveils", "launches"]):
                     clean = clean_link(link)
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean}")
                     save_seen_article(link)
+                    seen.add(link)        # Update in-memory set too
                     sent_count += 1
                     time.sleep(2)
 
                     if sent_count >= MAX_ARTICLES_TO_SEND:
                         break
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Feed error: {e}")
 
-    # Final message
-    time.sleep(4)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} relevant articles today.\n\nFocusing on breakthroughs in humanoid, drone, and autonomous tech."
+    # === Final Summary Message ===
+    time.sleep(5)
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} selected articles today.\n\nFocusing on humanoid, drone, autonomous systems and major breakthroughs."
     send_to_telegram(final_msg)
 
-    print(f"Finished. Sent {sent_count} articles.")
+    print(f"Finished. Sent {sent_count} articles this run.")
 
 if __name__ == "__main__":
     main()
