@@ -13,14 +13,14 @@ if not TELEGRAM_TOKEN or not CHAT_ID:
     print("❌ Missing Telegram credentials!")
     exit(1)
 
-# Gemini (optional)
+# Gemini Setup
 try:
     from google import genai
     client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-    print("✅ Gemini initialized" if client else "⚠ Gemini not configured")
-except ImportError:
+    print("✅ Gemini ready" if client else "⚠ Gemini disabled")
+except:
     client = None
-    print("⚠ google-genai library not available - summaries disabled")
+    print("⚠ Could not import google-genai")
 
 KEYWORDS = ["robot", "robots", "drone", "drones", "autonomous", "robotics", "uav", "unmanned", "humanoid"]
 
@@ -34,11 +34,12 @@ SEEN_FILE = "seen_articles.txt"
 articles_today = []
 MAX_ARTICLES_PER_RUN = 7
 
-def clean_google_news_link(link):
+def clean_link(link):
     if "news.google.com" in link:
         try:
             r = requests.head(link, allow_redirects=True, timeout=10)
-            return r.url.split("?")[0]
+            clean = r.url.split("?")[0]
+            return clean
         except:
             pass
     return link
@@ -61,46 +62,65 @@ def send_to_telegram(message):
     except:
         pass
 
+def generate_summary(articles):
+    if not client or not articles:
+        return "No AI summary available this run."
+    
+    article_list = "\n".join([f"- {a}" for a in articles])
+    prompt = f"""Summarize these robotics news articles in a clear, engaging way:
+
+{article_list}
+
+Structure:
+- One opening highlight
+- Bullet points of key news"""
+
+    try:
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        return response.text
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        return "Summary generation failed."
+
 def main():
     global articles_today
     seen = load_seen_articles()
     new_count = 0
-    print(f"[{datetime.now()}] Starting robotics news check...")
+    print(f"[{datetime.now()}] Starting check...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:20]:
+            for entry in feed.entries[:25]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:300]
+                summary = entry.get("summary", entry.get("description", ""))[:320]
 
                 if not title or not link or link in seen:
                     continue
 
-                if any(kw in (title + " " + summary).lower() for kw in KEYWORDS):
-                    clean_link = clean_google_news_link(link)
+                if any(kw in (title + summary).lower() for kw in KEYWORDS):
+                    clean_link = clean_link(link)
+                    
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean_link}")
 
-                    articles_today.append({"title": title})
+                    articles_today.append(title)
                     save_seen_article(link)
                     new_count += 1
-                    time.sleep(1.5)
+                    time.sleep(1.6)
 
                     if new_count >= MAX_ARTICLES_PER_RUN:
                         break
         except Exception as e:
-            print(f"Feed error: {e}")
+            print(f"Error: {e}")
 
-# Summary at the end
-    time.sleep(5)
-    if articles_today:
-        summary_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nTotal articles today: {len(articles_today)}\n\n(Full AI summary coming soon)"
-    else:
-        summary_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nNo new articles found today."
-    
-    send_to_telegram(summary_msg)
-    print(f"✅ Summary sent. Processed {new_count} articles.")
+    # Summary at the end
+    time.sleep(6)
+    summary_text = generate_summary(articles_today)
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{summary_text}\n\n📌 Total articles: {len(articles_today)}"
+    send_to_telegram(final_msg)
+
+    print(f"Finished. Sent {new_count} articles.")
 
 if __name__ == "__main__":
     main()
