@@ -31,17 +31,21 @@ def clean_link(link):
     return link
 
 def load_seen_articles():
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            return set(line.strip() for line in f if line.strip())
+    try:
+        if os.path.exists(SEEN_FILE):
+            with open(SEEN_FILE, "r", encoding="utf-8") as f:
+                return set(line.strip() for line in f if line.strip())
+    except:
+        pass
     return set()
 
 def save_seen_article(link):
     try:
         with open(SEEN_FILE, "a", encoding="utf-8") as f:
             f.write(link + "\n")
-    except:
-        pass
+        print(f"Saved to seen: {link[:60]}...")
+    except Exception as e:
+        print(f"Failed to save article: {e}")
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -54,7 +58,7 @@ def send_to_telegram(message):
 def main():
     seen = load_seen_articles()
     sent_count = 0
-    print(f"[{datetime.now()}] Starting check...")
+    print(f"[{datetime.now()}] Starting check... Current seen articles: {len(seen)}")
 
     for feed_url in RSS_FEEDS:
         try:
@@ -67,13 +71,12 @@ def main():
                 if not title or not link or link in seen:
                     continue
 
-                # Smart basic filter for more interesting articles
                 text = (title + summary).lower()
-                if any(word in text for word in ["humanoid", "labor", "labour", "drone", "breakthrough", "autonomous", "new robot", "unveils", "launches"]):
+                if any(word in text for word in ["humanoid", "drone", "autonomous", "breakthrough", "labour", "labor", "unveils", "launches"]):
                     clean = clean_link(link)
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean}")
                     save_seen_article(link)
-                    seen.add(link)        # Update in-memory set too
+                    seen.add(link)   # Update in memory too
                     sent_count += 1
                     time.sleep(2)
 
@@ -82,12 +85,12 @@ def main():
         except Exception as e:
             print(f"Feed error: {e}")
 
-    # === Final Summary Message ===
+    # Summary
     time.sleep(5)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} selected articles today.\n\nFocusing on humanoid, drone, autonomous systems and major breakthroughs."
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} articles today.\n\nFocusing on breakthroughs in humanoid, drone & autonomous tech."
     send_to_telegram(final_msg)
 
-    print(f"Finished. Sent {sent_count} articles this run.")
+    print(f"Finished run. Sent {sent_count} articles.")
 
 if __name__ == "__main__":
     main()
