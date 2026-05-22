@@ -23,7 +23,7 @@ RSS_FEEDS = [
 ]
 
 SEEN_FILE = "seen_articles.txt"
-MAX_ARTICLES_TO_SEND = 5
+MAX_ARTICLES_TO_SEND = 6
 
 def clean_link(link):
     if "news.google.com" in link:
@@ -40,6 +40,10 @@ def load_seen_articles():
             return set(line.strip() for line in f)
     return set()
 
+def save_seen_article(link):
+    with open(SEEN_FILE, "a", encoding="utf-8") as f:
+        f.write(link + "\n")
+
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
@@ -49,61 +53,71 @@ def send_to_telegram(message):
         pass
 
 def evaluate_article(title, summary):
-    """Agentic evaluation with reasoning"""
-    prompt = f"""You are an expert robotics analyst. Evaluate this article for importance.
+    prompt = f"""Rate this robotics article's importance (1-10) for people interested in technological breakthroughs.
 
 Title: {title}
 Summary: {summary}
 
-Rate it from 1-10 and explain briefly why.
-Focus on:
-- Breakthroughs in humanoid robots / replacing human labor
-- Major drone / UAV advancements
-- New autonomous systems or fundamental tech leaps
-- Industry-transforming potential
+Especially value:
+- Humanoid robots replacing/supplementing human labor
+- Major drone or autonomous tech advances
+- Fundamental new capabilities or industry shifts
 
-Return format:
+Reply in this exact format:
 Score: X/10
-Reason: [short reasoning]"""
+Reason: Short 1-sentence explanation"""
 
     try:
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        return response.text
-    except:
-        return "Score: 5/10\nReason: Evaluation failed."
+        text = response.text.strip()
+        # More robust parsing
+        score_line = [line for line in text.split('\n') if "Score:" in line]
+        reason_line = [line for line in text.split('\n') if "Reason:" in line]
+        
+        score = 5
+        if score_line:
+            try:
+                score = int(''.join(filter(str.isdigit, score_line[0])))
+            except:
+                pass
+                
+        reason = reason_line[0] if reason_line else text[:200]
+        return f"**Score: {min(max(score, 1), 10)}/10**\n{reason}"
+        
+    except Exception as e:
+        print(f"Evaluation error: {e}")
+        return "**Score: 5/10**\nEvaluation temporarily unavailable."
 
 def generate_overall_summary(top_articles):
-    """Create insightful daily overview"""
-    articles_text = "\n".join([f"- {a['title']}" for a in top_articles])
+    if not top_articles:
+        return "No major articles today."
     
-    prompt = f"""You are a forward-thinking robotics analyst. Write an insightful evening summary.
+    articles_list = "\n".join([f"- {a['title']}" for a in top_articles])
+    prompt = f"""Write a concise, insightful evening summary on today's robotics developments.
 
-Today's selected articles:
-{articles_text}
+Articles:
+{articles_list}
 
-Write a concise, professional summary (3-5 paragraphs) that highlights:
-- The main theme of the day
-- Key technological implications
-- What this means for the future of robotics"""
+Highlight the main trends and implications for the future."""
 
     try:
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text
     except:
-        return "Summary generation failed today."
+        return "Summary generation encountered an issue today."
 
 def main():
     seen = load_seen_articles()
     candidates = []
-    print(f"[{datetime.now()}] Starting agentic robotics news analysis...")
+    print(f"[{datetime.now()}] Starting advanced analysis...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:30]:
+            for entry in feed.entries[:35]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:500]
+                summary = entry.get("summary", entry.get("description", ""))[:450]
 
                 if not title or not link or link in seen:
                     continue
@@ -112,35 +126,29 @@ def main():
                 candidates.append({
                     "title": title,
                     "link": clean_link(link),
-                    "summary": summary,
                     "evaluation": evaluation
                 })
-                save_seen_article(link)   # Mark as seen even if not sent
-                time.sleep(1.5)
+                save_seen_article(link)
+                time.sleep(1.3)
         except Exception as e:
             print(f"Feed error: {e}")
 
-    # Select top articles based on AI evaluation
-    # Simple heuristic: take articles with higher scores (we can improve this later)
+    # Take top articles
     top_articles = candidates[:MAX_ARTICLES_TO_SEND]
 
-    # Send selected articles with AI evaluation
+    # Send articles
     for article in top_articles:
-        message = f"📰 **{article['title']}**\n\n{article['evaluation']}\n\n🔗 {article['link']}"
-        send_to_telegram(message)
+        msg = f"📰 **{article['title']}**\n\n{article['evaluation']}\n\n🔗 {article['link']}"
+        send_to_telegram(msg)
         time.sleep(2.5)
 
-    # Send overall insightful summary
+    # Overall Summary
     time.sleep(6)
-    overall_summary = generate_overall_summary(top_articles)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{overall_summary}"
+    overall = generate_overall_summary(top_articles)
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{overall}"
     send_to_telegram(final_msg)
 
-    print(f"Finished. Selected and analyzed {len(top_articles)} high-value articles.")
-
-def save_seen_article(link):
-    with open(SEEN_FILE, "a", encoding="utf-8") as f:
-        f.write(link + "\n")
+    print(f"Completed. Sent {len(top_articles)} selected articles.")
 
 if __name__ == "__main__":
     main()
