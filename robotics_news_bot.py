@@ -17,6 +17,9 @@ if not TELEGRAM_TOKEN or not CHAT_ID:
 client = None
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
+    print("✅ Gemini client initialized")
+else:
+    print("⚠ No Gemini API key")
 
 KEYWORDS = ["robot", "robots", "drone", "drones", "autonomous", 
             "robotics", "uav", "unmanned", "humanoid", "cobots"]
@@ -29,15 +32,13 @@ RSS_FEEDS = [
 
 SEEN_FILE = "seen_articles.txt"
 articles_today = []
-MAX_ARTICLES_PER_RUN = 10
+MAX_ARTICLES_PER_RUN = 8   # Reduced to avoid huge gluts
 
 def clean_google_news_link(link):
     if "news.google.com" in link:
         try:
             resp = requests.head(link, allow_redirects=True, timeout=8)
-            clean_link = resp.url
-            if "?" in clean_link:
-                clean_link = clean_link.split("?")[0]
+            clean_link = resp.url.split("?")[0]
             return clean_link
         except:
             pass
@@ -63,37 +64,37 @@ def send_to_telegram(message):
 
 def generate_daily_summary(articles):
     if not client or not articles:
-        return None
+        return "No articles to summarize today."
     
-    article_details = [f"Title: {a['title']}\nSummary: {a.get('summary', '')[:300]}" for a in articles]
+    article_details = [f"Title: {a['title']}\nSummary: {a.get('summary', '')[:250]}" for a in articles]
     
-    prompt = f"""You are a robotics expert. Create an engaging evening summary of today's robotics news.
+    prompt = f"""You are a robotics expert. Create one concise and engaging overall summary for all the articles below.
 
 Articles:
 {chr(10).join(article_details)}
 
-Structure:
-- Start with one strong highlight sentence
-- Use bullet points for key developments
-- Group similar topics if possible"""
+Structure your response as:
+- One strong opening highlight
+- 4-7 key bullet points
+- Keep it professional yet readable"""
 
     try:
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text
     except Exception as e:
-        print(f"Gemini error: {e}")
-        return None
+        print(f"Gemini failed: {e}")
+        return "Summary generation failed. Please check logs."
 
 def main():
     global articles_today
     seen = load_seen_articles()
     new_count = 0
-    print(f"[{datetime.now()}] Starting check...")
+    print(f"[{datetime.now()}] Starting evening check...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:20]:
+            for entry in feed.entries[:25]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
                 summary = entry.get("summary", entry.get("description", ""))[:350]
@@ -109,24 +110,26 @@ def main():
                     articles_today.append({"title": title, "summary": summary})
                     save_seen_article(link)
                     new_count += 1
-                    time.sleep(1.5)
+                    time.sleep(1.8)
 
                     if new_count >= MAX_ARTICLES_PER_RUN:
                         break
         except Exception as e:
             print(f"Feed error: {e}")
 
-    # === Summary at the very end ===
-    if articles_today and client:
-        print("Generating overall summary...")
-        time.sleep(4)                    # ← Extra delay so summary comes last
-        summary_text = generate_daily_summary(articles_today)
-        if summary_text:
-            final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{summary_text}\n\n📌 Total articles in this batch: {len(articles_today)}"
-            send_to_telegram(final_msg)
-            print("✅ Evening summary sent at the end!")
+    # === Overall Summary at the VERY END ===
+    print(f"Collected {len(articles_today)} articles for summary.")
+    time.sleep(5)   # Extra delay to ensure articles arrive first
 
-    print(f"Finished. Processed {new_count} articles.")
+    if client:
+        summary_text = generate_daily_summary(articles_today)
+        final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{summary_text}\n\n📌 Total articles in this run: {len(articles_today)}"
+        send_to_telegram(final_msg)
+        print("✅ Overall summary sent at the end!")
+    else:
+        print("No Gemini available for summary.")
+
+    print(f"[{datetime.now()}] Finished. Sent {new_count} articles.")
 
 if __name__ == "__main__":
     main()
