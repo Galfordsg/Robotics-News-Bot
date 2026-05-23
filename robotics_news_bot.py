@@ -37,16 +37,19 @@ def send_to_telegram(message):
     except:
         pass
 
-def is_high_value(title, summary):
+def is_interesting(title, summary):
     text = (title + " " + summary).lower()
-    strong_keywords = ["humanoid", "optimus", "figure ai", "atlas", "drone", "uav", "breakthrough", 
-                       "unveils", "launches", "replaces human", "labor", "autonomous system"]
-    return any(kw in text for kw in strong_keywords)
+    strong_terms = [
+        "humanoid", "optimus", "figure ai", "atlas", "agility", "drone", "uav", 
+        "swarm", "breakthrough", "unveils", "launches", "replaces human", 
+        "labor replacement", "autonomous system", "milestone"
+    ]
+    return any(term in text for term in strong_terms)
 
 def main():
     sent_count = 0
-    cutoff_date = datetime.now() - timedelta(days=2)   # Only articles from last 2 days
-    print(f"[{datetime.now()}] Starting recency-based check...")
+    cutoff = datetime.now() - timedelta(days=2)  # Only recent articles
+    print(f"[{datetime.now()}] Starting filtered check...")
 
     for feed_url in RSS_FEEDS:
         try:
@@ -54,22 +57,21 @@ def main():
             for entry in feed.entries[:40]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:350]
-                published = entry.get("published_parsed") or entry.get("updated_parsed")
+                summary = entry.get("summary", entry.get("description", ""))[:380]
 
                 if not title or not link:
                     continue
 
                 # Date filter
-                if published:
+                if entry.get("published_parsed"):
                     try:
-                        pub_date = datetime.fromtimestamp(time.mktime(published))
-                        if pub_date < cutoff_date:
+                        pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed))
+                        if pub_date < cutoff:
                             continue
                     except:
                         pass
 
-                if is_high_value(title, summary):
+                if is_interesting(title, summary):
                     clean = clean_link(link)
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean}")
                     sent_count += 1
@@ -78,14 +80,17 @@ def main():
                     if sent_count >= MAX_ARTICLES_TO_SEND:
                         break
         except Exception as e:
-            print(f"Feed error: {e}")
+            print(f"Error: {e}")
 
-    # Final Summary
+    # === Always send summary at the end ===
     time.sleep(5)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent_count} high-value articles today.\n\nFocused on major breakthroughs in humanoid, drone, and autonomous technology."
+    if sent_count > 0:
+        final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nToday's focus: {sent_count} high-potential articles on humanoid robots, drones, and autonomous breakthroughs."
+    else:
+        final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nNo major new breakthroughs found today."
+    
     send_to_telegram(final_msg)
-
-    print(f"Finished. Sent {sent_count} articles.")
+    print(f"Finished. Sent {sent_count} articles + summary.")
 
 if __name__ == "__main__":
     main()
