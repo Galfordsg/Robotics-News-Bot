@@ -1,9 +1,8 @@
 import feedparser
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# === CONFIGURATION ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -16,17 +15,6 @@ RSS_FEEDS = [
     "https://roboticsandautomationnews.com/feed/",
 ]
 
-MAX_ARTICLES = 8
-
-def clean_link(link):
-    if "news.google.com" in link:
-        try:
-            r = requests.head(link, allow_redirects=True, timeout=10)
-            return r.url.split("?")[0]
-        except:
-            pass
-    return link
-
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
@@ -35,44 +23,28 @@ def send_to_telegram(message):
         pass
 
 def main():
-    sent_count = 0
-    cutoff = datetime.now() - timedelta(days=2)
-    print(f"[{datetime.now()}] Starting stable run...")
+    print(f"[{datetime.now()}] Script started successfully.")
+    sent = 0
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:40]:
+            print(f"Fetched feed: {feed_url}")
+            for entry in feed.entries[:8]:   # Limit to avoid flood
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:380]
+                summary = entry.get("summary", entry.get("description", ""))[:300]
 
-                if not title or not link:
-                    continue
-
-                # Date filter to reduce repeats
-                if entry.get("published_parsed"):
-                    try:
-                        pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        if pub_date < cutoff:
-                            continue
-                    except:
-                        pass
-
-                # Send article
-                clean = clean_link(link)
-                send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {clean}")
-                sent_count += 1
-                time.sleep(2)
+                if title and link:
+                    send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {link}")
+                    sent += 1
+                    time.sleep(2)
         except Exception as e:
-            print(f"Feed error: {e}")
+            print(f"Error with feed {feed_url}: {e}")
 
-    # Guaranteed summary at the end
-    time.sleep(6)
-    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{sent_count} articles sent today from major robotics sources.\n\nFocus: Humanoids, drones, autonomous systems and industry developments."
-    send_to_telegram(final_msg)
-
-    print(f"Run completed. Sent {sent_count} articles.")
+    time.sleep(4)
+    send_to_telegram(f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent} articles today.")
+    print(f"Finished. Sent {sent} articles.")
 
 if __name__ == "__main__":
     main()
