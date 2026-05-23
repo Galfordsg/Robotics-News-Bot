@@ -1,17 +1,16 @@
 import feedparser
 import requests
 import time
-import os
 from datetime import datetime
 
-# === CONFIGURATION ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("❌ Missing Telegram credentials!")
+    print("❌ Missing credentials!")
     exit(1)
 
+# Only reliable feeds
 RSS_FEEDS = [
     "https://www.therobotreport.com/feed/",
     "https://roboticsandautomationnews.com/feed/",
@@ -25,27 +24,33 @@ def send_to_telegram(message):
         pass
 
 def main():
-    print(f"[{datetime.now()}] Script started successfully.")
     sent = 0
+    print(f"[{datetime.now()}] Starting run...")
 
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
-            print(f"Fetched: {feed_url}")
-            for entry in feed.entries[:10]:   # Limit to avoid too many messages
+            for entry in feed.entries[:30]:
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:350]
+                summary = entry.get("summary", entry.get("description", ""))[:400]
 
-                if title and link:
+                if not title or not link:
+                    continue
+
+                # Prioritize more interesting articles
+                if any(kw in (title + summary).lower() for kw in ["humanoid", "drone", "autonomous", "breakthrough", "unveils", "launches", "optimus", "atlas"]):
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {link}")
                     sent += 1
                     time.sleep(2)
         except Exception as e:
-            print(f"Error with feed {feed_url}: {e}")
+            print(f"Error: {e}")
 
-    time.sleep(4)
-    send_to_telegram(f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\nSent {sent} articles today.")
+    # Evening summary
+    time.sleep(5)
+    final_msg = f"📊 **Robotics News Evening Edition** — {datetime.now().strftime('%B %d, %Y')}\n\n{sent} articles sent today.\n\nCovered latest developments in humanoid robots, drones, autonomous systems and other key robotics news."
+    send_to_telegram(final_msg)
+
     print(f"Finished. Sent {sent} articles.")
 
 if __name__ == "__main__":
