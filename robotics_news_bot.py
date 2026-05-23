@@ -1,13 +1,15 @@
 import feedparser
 import requests
 import time
+import os
 from datetime import datetime
 
+# === CONFIGURATION ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("❌ Missing credentials!")
+    print("❌ Missing Telegram credentials!")
     exit(1)
 
 RSS_FEEDS = [
@@ -30,10 +32,10 @@ def main():
         try:
             feed = feedparser.parse(feed_url)
             print(f"Fetched feed: {feed_url}")
-            for entry in feed.entries[:8]:   # Limit to avoid flood
+            for entry in feed.entries[:10]:   # Limit to prevent flood
                 title = entry.get("title", "").strip()
                 link = entry.get("link", "")
-                summary = entry.get("summary", entry.get("description", ""))[:300]
+                summary = entry.get("summary", entry.get("description", ""))[:350]
 
                 if title and link:
                     send_to_telegram(f"📰 **{title}**\n\n{summary}\n\n🔗 {link}")
