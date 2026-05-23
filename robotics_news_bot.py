@@ -1,6 +1,7 @@
 import feedparser
 import requests
 import time
+import os
 from datetime import datetime
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
